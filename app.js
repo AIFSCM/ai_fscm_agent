@@ -1,49 +1,57 @@
 const express = require('express');
-const axios = require('axios');
-const app = express();
+const axios   = require('axios');
+const qs      = require('querystring');
+const app     = express();
 app.use(express.json());
 
-// ── Credentials from environment variables ────────────────
-const FUSION_HOST  = 'https://elup-test.fa.em2.oraclecloud.com';
-const FUSION_USER  = process.env.FUSION_USER;
-const FUSION_PASS  = process.env.FUSION_PASS;
-const AGENT_CODE   = process.env.AGENT_CODE;
-const WA_TOKEN     = process.env.WA_TOKEN;
-const PHONE_ID     = process.env.PHONE_ID;
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+// ── Credentials ───────────────────────────────────────────
+const CLIENT_ID     = process.env.CLIENT_ID;
+const CLIENT_SECRET = process.env.CLIENT_SECRET;
+const TOKEN_URL     = process.env.TOKEN_URL;
+const FUSION_HOST   = process.env.FUSION_HOST;
+const AGENT_CODE    = process.env.AGENT_CODE;
+const WA_TOKEN      = process.env.WA_TOKEN;
+const PHONE_ID      = process.env.PHONE_ID;
+const VERIFY_TOKEN  = process.env.VERIFY_TOKEN;
 
-// Basic Auth header for Oracle Fusion
-const basicAuth = () =>
-  'Basic ' + Buffer.from(`${FUSION_USER}:${FUSION_PASS}`).toString('base64');
+// ── Get Oracle OAuth Token ────────────────────────────────
+let cachedToken    = null;
+let tokenExpiresAt = 0;
 
-// ── Root route (health check) ─────────────────────────────
-app.get('/', (req, res) => {
-  res.send('Oracle WhatsApp Bridge is running ✅');
-});
-
-// ── Webhook verification (Meta requirement) ───────────────
-app.get('/webhook', (req, res) => {
-  const mode      = req.query['hub.mode'];
-  const token     = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-
-  console.log('Meta verification request received');
-  console.log('Mode:', mode);
-  console.log('Token received:', token);
-  console.log('Token expected:', VERIFY_TOKEN);
-
-  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    console.log('✅ Webhook verified successfully');
-    res.status(200).send(challenge);
-  } else {
-    console.log('❌ Verification failed - token mismatch');
-    res.sendStatus(403);
+async function getOAuthToken() {
+  // Return cached token if still valid
+  if (cachedToken && Date.now() < tokenExpiresAt) {
+    return cachedToken;
   }
-});
+
+  console.log('🔑 Fetching new OAuth token...');
+
+  const response = await axios.post(
+    TOKEN_URL,
+    qs.stringify({
+      grant_type : 'client_credentials',
+      scope      : `urn:opc:resource:fusion:elup-test:fusion-ai/`
+    }),
+    {
+      auth: {
+        username: CLIENT_ID,
+        password: CLIENT_SECRET
+      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    }
+  );
+
+  cachedToken    = response.data.access_token;
+  tokenExpiresAt = Date.now() + (response.data.expires_in - 60) * 1000;
+  console.log('✅ OAuth token obtained');
+  return cachedToken;
+}
 
 // ── Call Oracle AI Agent ──────────────────────────────────
 async function callAgent(userMessage, conversationId = null) {
   try {
+    const token = await getOAuthToken();
+
     const body = {
       message: {
         content: [{ type: 'text', text: userMessage }]
@@ -57,7 +65,7 @@ async function callAgent(userMessage, conversationId = null) {
       body,
       {
         headers: {
-          Authorization: basicAuth(),
+          Authorization : `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       }
@@ -65,15 +73,15 @@ async function callAgent(userMessage, conversationId = null) {
 
     const jobId  = invokeRes.data.jobId;
     const convId = invokeRes.data.conversationId;
-    console.log('Job ID:', jobId);
+    console.log('📋 Job ID:', jobId);
 
-    // Poll for result every 2 seconds max 15 times (30 seconds)
+    // Poll for result every 2 seconds max 15 times
     for (let i = 0; i < 15; i++) {
       await new Promise(r => setTimeout(r, 2000));
 
       const statusRes = await axios.get(
         `${FUSION_HOST}/api/fusion-ai/orchestrator/agent/v2/${AGENT_CODE}/invokeAsync/${jobId}`,
-        { headers: { Authorization: basicAuth() } }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
 
       console.log(`Poll ${i + 1} status:`, statusRes.data.status);
@@ -81,21 +89,30 @@ async function callAgent(userMessage, conversationId = null) {
       if (statusRes.data.status === 'COMPLETED') {
         const reply =
           statusRes.data?.message?.content?.[0]?.text ||
-          statusRes.data?.output?.content?.[0]?.text ||
-          'I received your message but got an empty response.';
+          statusRes.data?.output?.content?.[0]?.text  ||
+          'Request completed but no response text found.';
         return { reply, conversationId: convId };
       }
 
       if (statusRes.data.status === 'FAILED') {
-        return { reply: 'Sorry, the agent failed to process your request.', conversationId: convId };
+        return {
+          reply: 'Sorry, the agent failed to process your request.',
+          conversationId: convId
+        };
       }
     }
 
-    return { reply: 'Agent is taking too long. Please try again.', conversationId: null };
+    return {
+      reply: 'Agent is taking too long. Please try again.',
+      conversationId: null
+    };
 
   } catch (err) {
-    console.error('Agent error:', err.response?.data || err.message);
-    return { reply: 'Error connecting to Oracle. Please try again.', conversationId: null };
+    console.error('❌ Agent error:', err.response?.data || err.message);
+    return {
+      reply: 'Error connecting to Oracle. Please try again later.',
+      conversationId: null
+    };
   }
 }
 
@@ -106,34 +123,56 @@ async function sendWhatsApp(to, message) {
       `https://graph.facebook.com/v18.0/${PHONE_ID}/messages`,
       {
         messaging_product: 'whatsapp',
-        to: to,
+        to  : to,
         type: 'text',
         text: { body: message }
       },
       {
         headers: {
-          Authorization: `Bearer ${WA_TOKEN}`,
+          Authorization : `Bearer ${WA_TOKEN}`,
           'Content-Type': 'application/json'
         }
       }
     );
     console.log('✅ WhatsApp message sent to:', to);
   } catch (err) {
-    console.error('WhatsApp send error:', err.response?.data || err.message);
+    console.error('❌ WhatsApp error:', err.response?.data || err.message);
   }
 }
 
-// ── Main webhook: receive WhatsApp message ────────────────
+// ── Health check ──────────────────────────────────────────
+app.get('/', (req, res) => {
+  res.send('Oracle WhatsApp Bridge is running ✅');
+});
+
+// ── Webhook verification ──────────────────────────────────
+app.get('/webhook', (req, res) => {
+  const mode      = req.query['hub.mode'];
+  const token     = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  console.log('Meta verification attempt - token received:', token);
+
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('✅ Webhook verified');
+    res.status(200).send(challenge);
+  } else {
+    console.log('❌ Verification failed');
+    res.sendStatus(403);
+  }
+});
+
+// ── Receive WhatsApp messages ─────────────────────────────
 const sessions = {};
 
 app.post('/webhook', async (req, res) => {
-  res.sendStatus(200); // always respond to Meta immediately
+  res.sendStatus(200);
 
   try {
     const entry   = req.body?.entry?.[0]?.changes?.[0]?.value;
     const message = entry?.messages?.[0];
-
     if (!message) return;
+
     if (message.type !== 'text') {
       await sendWhatsApp(message.from, 'Sorry, I can only process text messages.');
       return;
@@ -145,7 +184,6 @@ app.post('/webhook', async (req, res) => {
 
     console.log(`📱 Message from ${userPhone}: ${userText}`);
 
-    // Send thinking message so user knows it is working
     await sendWhatsApp(userPhone, '⏳ Processing your request, please wait...');
 
     const { reply, conversationId } = await callAgent(userText, convId);
@@ -154,7 +192,7 @@ app.post('/webhook', async (req, res) => {
     await sendWhatsApp(userPhone, reply);
 
   } catch (err) {
-    console.error('Webhook error:', err.message);
+    console.error('❌ Webhook error:', err.message);
   }
 });
 
@@ -162,7 +200,7 @@ app.post('/webhook', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`VERIFY_TOKEN set: ${!!VERIFY_TOKEN}`);
-  console.log(`FUSION_USER set: ${!!FUSION_USER}`);
-  console.log(`AGENT_CODE set: ${!!AGENT_CODE}`);
+  console.log(`CLIENT_ID set    : ${!!CLIENT_ID}`);
+  console.log(`AGENT_CODE set   : ${!!AGENT_CODE}`);
+  console.log(`VERIFY_TOKEN set : ${!!VERIFY_TOKEN}`);
 });
