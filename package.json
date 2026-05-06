@@ -2,12 +2,12 @@
   "name": "fusion-ai-agent",
   "version": "1.0.0",
   "main": "app.js",
-  "scripts": {
-    "start": "node app.js"
-  },
   "dependencies": {
+    "express": "^4.18.0",
     "axios": "^1.6.0",
-    "dotenv": "^16.0.0",
-    "express": "^4.18.2"
+    "querystring": "^0.2.1"
+  },
+  "scripts": {
+    "start": "app.js"
   }
 }
