@@ -5,7 +5,26 @@ const axios = require("axios");
 const app = express();
 app.use(express.json());
 
-// Health check
+// 🔐 Function to get OAuth token
+async function getAccessToken() {
+  const response = await axios.post(
+    process.env.IDCS_TOKEN_URL,
+    "grant_type=client_credentials",
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      auth: {
+        username: process.env.CLIENT_ID,
+        password: process.env.CLIENT_SECRET
+      }
+    }
+  );
+
+  return response.data.access_token;
+}
+
+// Test route
 app.get("/", (req, res) => {
   res.send("Fusion AI Agent is running 🚀");
 });
@@ -13,21 +32,18 @@ app.get("/", (req, res) => {
 // Chat endpoint
 app.post("/chat", async (req, res) => {
   try {
-    const message = req.body.message;
+    const userMessage = req.body.message;
 
-    // Validate input
-    if (!message) {
-      return res.status(400).json({ error: "Message is required" });
-    }
+    const token = await getAccessToken();
 
     const response = await axios.post(
       `${process.env.FUSION_URL}/orchestrator/agent/v2/${process.env.AGENT_TEAM_ID}/invokeAsync`,
       {
-        message: message   // ✅ fixed here
+        message: userMessage
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.ACCESS_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         }
       }
@@ -36,11 +52,8 @@ app.post("/chat", async (req, res) => {
     res.json(response.data);
 
   } catch (error) {
-    console.error("ERROR:", error.response?.data || error.message);
-
-    res.status(500).json({
-      error: error.response?.data || "Something went wrong"
-    });
+    console.error(error.response?.data || error.message);
+    res.status(500).json({ error: "Error calling Fusion API" });
   }
 });
 
@@ -48,10 +61,4 @@ app.post("/chat", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-});
-
-// JSON error handler
-app.use((err, req, res, next) => {
-  console.error("Invalid JSON:", err.message);
-  res.status(400).json({ error: "Invalid JSON format" });
 });
