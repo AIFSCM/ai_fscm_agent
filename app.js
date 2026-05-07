@@ -204,3 +204,16 @@ app.listen(PORT, () => {
   console.log(`AGENT_CODE set   : ${!!AGENT_CODE}`);
   console.log(`VERIFY_TOKEN set : ${!!VERIFY_TOKEN}`);
 });
+
+app.get('/debug', (req, res) => {
+  res.json({
+    FUSION_HOST   : process.env.FUSION_HOST   || 'NOT SET',
+    AGENT_CODE    : process.env.AGENT_CODE    || 'NOT SET',
+    TOKEN_URL     : process.env.TOKEN_URL     || 'NOT SET',
+    CLIENT_ID     : process.env.CLIENT_ID     ? 'SET' : 'NOT SET',
+    CLIENT_SECRET : process.env.CLIENT_SECRET ? 'SET' : 'NOT SET',
+    WA_TOKEN      : process.env.WA_TOKEN      ? 'SET' : 'NOT SET',
+    PHONE_ID      : process.env.PHONE_ID      || 'NOT SET',
+    VERIFY_TOKEN  : process.env.VERIFY_TOKEN  || 'NOT SET'
+  });
+});
