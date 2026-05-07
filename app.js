@@ -186,4 +186,60 @@ app.get('/webhook', (req, res) => {
   const token     = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  console
+  console.log('Webhook verification attempt, token received:', token);
+
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('Webhook verified successfully');
+    res.status(200).send(challenge);
+  } else {
+    console.log('Webhook verification failed');
+    res.sendStatus(403);
+  }
+});
+
+// ── Conversation sessions ─────────────────────────────────
+const sessions = {};
+
+// ── Receive WhatsApp messages ─────────────────────────────
+app.post('/webhook', async (req, res) => {
+  res.sendStatus(200);
+
+  try {
+    const entry   = req.body?.entry?.[0]?.changes?.[0]?.value;
+    const message = entry?.messages?.[0];
+    if (!message) return;
+
+    if (message.type !== 'text') {
+      await sendWhatsApp(message.from, 'Sorry, I can only process text messages.');
+      return;
+    }
+
+    const userPhone = message.from;
+    const userText  = message.text.body;
+    const convId    = sessions[userPhone] || null;
+
+    console.log(`Message from ${userPhone}: ${userText}`);
+    await sendWhatsApp(userPhone, 'Processing your request, please wait...');
+
+    const { reply, conversationId } = await callAgent(userText, convId);
+    sessions[userPhone] = conversationId;
+
+    await sendWhatsApp(userPhone, reply);
+
+  } catch (err) {
+    console.error('Webhook error:', err.message);
+  }
+});
+
+// ── Start server ──────────────────────────────────────────
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`FUSION_HOST   : ${FUSION_HOST}`);
+  console.log(`AGENT_CODE    : ${AGENT_CODE}`);
+  console.log(`TOKEN_URL     : ${TOKEN_URL}`);
+  console.log(`CLIENT_ID set : ${!!CLIENT_ID}`);
+  console.log(`FUSION_USER   : ${FUSION_USER ? 'SET' : 'NOT SET'}`);
+  console.log(`WA_TOKEN set  : ${!!WA_TOKEN}`);
+  console.log(`PHONE_ID      : ${PHONE_ID}`);
+});
