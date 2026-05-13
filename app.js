@@ -42,7 +42,7 @@ async function getOAuthToken() {
     console.log('Token obtained OK');
     return cachedToken;
   } catch (err) {
-    console.error('Token error:', JSON.stringify(err.response ? err.response.data : err.message));
+    console.error('Token error: ' + JSON.stringify(err.response ? err.response.data : err.message));
     throw new Error('Token failed');
   }
 }
@@ -54,34 +54,26 @@ async function callOracleAgent(userMessage, conversationId) {
     if (conversationId) {
       body.conversationId = conversationId;
     }
-
     var invokeURL = FUSION_HOST + '/api/fusion-ai/orchestrator/agent/v2/' + AGENT_CODE + '/invokeAsync';
     console.log('Calling invokeAsync: ' + invokeURL);
-
     var invokeRes = await axios.post(invokeURL, body, {
       headers: {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json'
       }
     });
-
     var jobId = invokeRes.data.jobId;
     var convId = invokeRes.data.conversationId;
     console.log('Job ID: ' + jobId);
-
     var statusURL = FUSION_HOST + '/api/fusion-ai/orchestrator/agent/v2/' + AGENT_CODE + '/status/' + jobId;
     console.log('Status URL: ' + statusURL);
-
     for (var i = 0; i < 20; i++) {
       await new Promise(function(r) { setTimeout(r, 2000); });
-
       var statusRes = await axios.get(statusURL, {
         headers: { 'Authorization': 'Bearer ' + token }
       });
-
       var status = statusRes.data.status;
       console.log('Poll ' + (i + 1) + ' status: ' + status);
-
       if (status === 'COMPLETE') {
         console.log('Full response: ' + JSON.stringify(statusRes.data));
         var reply = '';
@@ -95,18 +87,14 @@ async function callOracleAgent(userMessage, conversationId) {
         console.log('Agent reply: ' + reply);
         return { reply: reply, conversationId: convId };
       }
-
       if (status === 'FAILED' || status === 'ERROR') {
         console.error('Agent failed: ' + JSON.stringify(statusRes.data));
         return { reply: 'Sorry, the agent failed to process your request.', conversationId: convId };
       }
     }
-
     return { reply: 'Agent is taking too long. Please try again.', conversationId: null };
-
   } catch (err) {
-    console.error('Agent error status: ' + (err.response ? err.response.status : 'none'));
-    console.error('Agent error data: ' + JSON.stringify(err.response ? err.response.data : err.message));
+    console.error('Agent error: ' + JSON.stringify(err.response ? err.response.data : err.message));
     return callDirectAPI(userMessage);
   }
 }
@@ -130,7 +118,9 @@ async function callDirectAPI(userMessage) {
       title = 'Paid AP Invoices';
     }
     var url = FUSION_HOST + '/fscmRestApi/resources/11.13.18.05/invoices?limit=5';
-    if (queryParams) url = url + '&' + queryParams;
+    if (queryParams) {
+      url = url + '&' + queryParams;
+    }
     var res = await axios.get(url, {
       auth: { username: FUSION_USER, password: FUSION_PASS }
     });
@@ -162,28 +152,22 @@ async function sendWhatsApp(to, text) {
   try {
     var waUrl = 'https://graph.facebook.com/v18.0/' + PHONE_ID + '/messages';
     console.log('WhatsApp URL: ' + waUrl);
-    console.log('PHONE_ID value: ' + PHONE_ID);
-    console.log('WA_TOKEN set: ' + (WA_TOKEN ? 'YES' : 'NO'));
     console.log('Sending to: ' + to);
-    await axios.post(
-      waUrl,
-      {
-        messaging_product: 'whatsapp',
-        to: to,
-        type: 'text',
-        text: { body: text }
-      },
-      {
-        headers: {
-          'Authorization': 'Bearer ' + WA_TOKEN,
-          'Content-Type': 'application/json'
-        }
+    await axios.post(waUrl, {
+      messaging_product: 'whatsapp',
+      to: to,
+      type: 'text',
+      text: { body: text }
+    }, {
+      headers: {
+        'Authorization': 'Bearer ' + WA_TOKEN,
+        'Content-Type': 'application/json'
       }
-    );
+    });
     console.log('WhatsApp sent to: ' + to);
   } catch (e) {
     console.error('WhatsApp error: ' + e.message);
-    console.error('WhatsApp error details: ' + JSON.stringify(e.response ? e.response.data : 'no response'));
+    console.error('WhatsApp details: ' + JSON.stringify(e.response ? e.response.data : 'no response'));
   }
 }
 
@@ -211,4 +195,42 @@ app.get('/webhook', function(req, res) {
   var token = req.query['hub.verify_token'];
   var challenge = req.query['hub.challenge'];
   console.log('Webhook verify token: ' + token);
-  if (mode === 'subscribe
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    console.log('Webhook verified OK');
+    res.status(200).send(challenge);
+  } else {
+    res.sendStatus(403);
+  }
+});
+
+app.post('/webhook', async function(req, res) {
+  res.sendStatus(200);
+  try {
+    var entry = req.body && req.body.entry && req.body.entry[0];
+    var change = entry && entry.changes && entry.changes[0];
+    var value = change && change.value;
+    var message = value && value.messages && value.messages[0];
+    if (!message || message.type !== 'text') return;
+    var userPhone = message.from;
+    var userText = message.text.body;
+    var convId = sessions[userPhone] || null;
+    console.log('Message from ' + userPhone + ': ' + userText);
+    await sendWhatsApp(userPhone, 'Processing your request, please wait...');
+    var result = await callOracleAgent(userText, convId);
+    sessions[userPhone] = result.conversationId;
+    await sendWhatsApp(userPhone, result.reply);
+  } catch (e) {
+    console.error('Webhook error: ' + e.message);
+  }
+});
+
+var PORT = process.env.PORT || 3000;
+app.listen(PORT, function() {
+  console.log('Server running on port ' + PORT);
+  console.log('FUSION_HOST: ' + FUSION_HOST);
+  console.log('AGENT_CODE: ' + AGENT_CODE);
+  console.log('CLIENT_ID set: ' + !!CLIENT_ID);
+  console.log('FUSION_USER: ' + (FUSION_USER ? 'SET' : 'NOT SET'));
+  console.log('WA_TOKEN set: ' + !!WA_TOKEN);
+  console.log('PHONE_ID: ' + PHONE_ID);
+});
