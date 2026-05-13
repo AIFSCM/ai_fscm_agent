@@ -173,7 +173,7 @@ async function callOracleAgent(userMessage, conversationId) {
 
 async function sendWhatsApp(to, text) {
   try {
-    var waUrl = 'https: //graph.facebook.com/v18.0/' + PHONE_ID + '/messages';
+    var waUrl = 'https://graph.facebook.com/v18.0/' + PHONE_ID + '/messages';
     console.log('WhatsApp URL: ' + waUrl);
     console.log('PHONE_ID value: ' + PHONE_ID);
     console.log('WA_TOKEN set: ' + (WA_TOKEN ? 'YES' : 'NO'));
