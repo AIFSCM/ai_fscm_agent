@@ -134,27 +134,23 @@ async function callOracleAgent(userMessage, conversationId) {
             });
       var status = statusRes.data.status;
       console.log('Poll ' + (i + 1) + ' status: ' + status);
-      if (status === 'COMPLETED') {
+      if (status === 'COMPLETE') {
         var reply = '';
-        if (statusRes.data.message && statusRes.data.message.content && statusRes.data.message.content[
-                    0
-                ]) {
-          reply = statusRes.data.message.content[
-                        0
-                    ].text;
-                } else if (statusRes.data.output && statusRes.data.output.content && statusRes.data.output.content[
-                    0
-                ]) {
-          reply = statusRes.data.output.content[
-                        0
-                    ].text;
-                } else {
-          reply = 'Request completed but no response text found.';
-                }
-        console.log('Agent reply received');
-        return { reply: reply, conversationId: convId
-                };
-            }
+        if (status === 'COMPLETE') {
+  console.log('Full response: ' + JSON.stringify(statusRes.data));
+  var reply = '';
+  if (statusRes.data.output) {
+    reply = statusRes.data.output;
+  } else if (statusRes.data.message) {
+    reply = statusRes.data.message;
+  } else if (statusRes.data.followUpQuestions) {
+    reply = 'Request completed but no response text found.';
+  } else {
+    reply = JSON.stringify(statusRes.data);
+  }
+  console.log('Agent reply: ' + reply);
+  return { reply: reply, conversationId: convId };
+}
       if (status === 'FAILED') {
         console.error('Agent failed');
         return { reply: 'Sorry, the agent failed to process your request.', conversationId: convId
