@@ -122,7 +122,7 @@ async function callOracleAgent(userMessage, conversationId) {
     var jobId = invokeRes.data.jobId;
     var convId = invokeRes.data.conversationId;
     console.log('Job ID: ' + jobId);
-    var statusURL = FUSION_HOST + '/api/fusion-ai/orchestrator/agent/v2/' + AGENT_CODE + '/invokeAsync/' + jobId;
+   var statusURL = FUSION_HOST + '/api/fusion-ai/orchestrator/agent/v2/' + AGENT_CODE + '/status/' + jobId;
     for (var i = 0; i < 20; i++) {
       await new Promise(function(r) { setTimeout(r,
                 2000);
