@@ -108,7 +108,7 @@ async function callOracleAgent(userMessage, conversationId) {
     var token = await getOAuthToken();
     var body = {
   message: userMessage
-};
+        };
     if (conversationId) body.conversationId = conversationId;
     var invokeURL = FUSION_HOST + '/api/fusion-ai/orchestrator/agent/v2/' + AGENT_CODE + '/invokeAsync';
     console.log('Calling invokeAsync: ' + invokeURL);
@@ -173,31 +173,32 @@ async function callOracleAgent(userMessage, conversationId) {
 
 async function sendWhatsApp(to, text) {
   try {
-    var waUrl = 'https://graph.facebook.com/v18.0/' + PHONE_ID + '/messages';
+    var waUrl = 'https: //graph.facebook.com/v18.0/' + PHONE_ID + '/messages';
     console.log('WhatsApp URL: ' + waUrl);
     console.log('PHONE_ID value: ' + PHONE_ID);
     console.log('WA_TOKEN set: ' + (WA_TOKEN ? 'YES' : 'NO'));
     console.log('Sending to: ' + to);
     await axios.post(
       waUrl,
-      {
+        {
         messaging_product: 'whatsapp',
         to: to,
         type: 'text',
-        text: { body: text }
-      },
-      {
+        text: { body: text
+            }
+        },
+        {
         headers: {
           'Authorization': 'Bearer ' + WA_TOKEN,
           'Content-Type': 'application/json'
+            }
         }
-      }
     );
     console.log('WhatsApp sent to: ' + to);
-  } catch (e) {
+    } catch (e) {
     console.error('WhatsApp error: ' + e.message);
     console.error('WhatsApp error details: ' + JSON.stringify(e.response ? e.response.data : 'no response'));
-  }
+    }
 }
 
 app.get('/', function(req, res) {
