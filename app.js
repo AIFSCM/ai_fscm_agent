@@ -107,13 +107,8 @@ async function callOracleAgent(userMessage, conversationId) {
   try {
     var token = await getOAuthToken();
     var body = {
-      message: {
-        content: [
-                    { type: 'text', text: userMessage
-                    }
-                ]
-            }
-        };
+  message: userMessage
+};
     if (conversationId) body.conversationId = conversationId;
     var invokeURL = FUSION_HOST + '/api/fusion-ai/orchestrator/agent/v2/' + AGENT_CODE + '/invokeAsync';
     console.log('Calling invokeAsync: ' + invokeURL);
