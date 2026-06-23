@@ -14,7 +14,7 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET || '';
 const TOKEN_URL = process.env.TOKEN_URL || 'https: //idcs-1db6ad5580804382953e5ab516205434.identity.oraclecloud.com/oauth2/v1/token';
 const AGENT_CODE = process.env.AGENT_CODE || 'AR_COLLECTIONS_ASSISTANT';
 const WA_TOKEN = process.env.WA_TOKEN || '';
-const PHONE_ID = process.env.PHONE_ID || '1086132367916692';
+const PHONE_ID = process.env.PHONE_ID || '1124786120717706';
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'mySecret123';
 
 let cachedToken = null;
