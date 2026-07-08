@@ -6,9 +6,12 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-const FUSION_HOST = (process.env.FUSION_HOST || 'https://elup.fa.em2.oraclecloud.com').replace(/\/$/, '');
+const FUSION_HOST = process.env.FUSION_HOST || 'https://elup-test.fa.em2.oraclecloud.com';
 const FUSION_USER = process.env.FUSION_USER || '';
 const FUSION_PASS = process.env.FUSION_PASS || '';
+const CLIENT_ID = process.env.CLIENT_ID || '';
+const CLIENT_SECRET = process.env.CLIENT_SECRET || '';
+const TOKEN_URL = process.env.TOKEN_URL || 'https://idcs-1db6ad5580804382953e5ab516205434.identity.oraclecloud.com/oauth2/v1/token';
 const AGENT_CODE = process.env.AGENT_CODE || 'AR_COLLECTIONS_ASSISTANT';
 const WA_TOKEN = process.env.WA_TOKEN || '';
 const PHONE_ID = process.env.PHONE_ID || '1086132367916692';
@@ -29,11 +32,10 @@ async function getOAuthToken() {
     params.append('grant_type', 'password');
     params.append('username', FUSION_USER);
     params.append('password', FUSION_PASS);
-
-    const tokenURL = FUSION_HOST + '/ms_oauth/oauth2/endpoints/oauthservice/tokens';
-    const res = await axios.post(tokenURL, params.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      auth: { username: FUSION_USER, password: FUSION_PASS }
+    params.append('scope', 'urn:opc:resource:fusion:elup-test:fusion-ai/');
+    const res = await axios.post(TOKEN_URL, params.toString(), {
+      auth: { username: CLIENT_ID, password: CLIENT_SECRET },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
     cachedToken = res.data.access_token;
     tokenExpiresAt = Date.now() + ((res.data.expires_in || 3600) - 60) * 1000;
@@ -87,13 +89,62 @@ async function callOracleAgent(userMessage, conversationId) {
       }
       if (status === 'FAILED' || status === 'ERROR') {
         console.error('Agent failed: ' + JSON.stringify(statusRes.data));
-        return { reply: 'Sorry, the agent was unable to process your request. Please try again.', conversationId: convId };
+        return { reply: 'Sorry, the agent failed to process your request.', conversationId: convId };
       }
     }
-    return { reply: 'The request is taking longer than expected. Please try again.', conversationId: null };
+    return { reply: 'Agent is taking too long. Please try again.', conversationId: null };
   } catch (err) {
     console.error('Agent error: ' + JSON.stringify(err.response ? err.response.data : err.message));
-    return { reply: 'Sorry, something went wrong. Please try again later.', conversationId: null };
+    return callDirectAPI(userMessage);
+  }
+}
+
+async function callDirectAPI(userMessage) {
+  try {
+    var msg = userMessage.toLowerCase();
+    var queryParams = '';
+    var title = 'Latest AP Invoices';
+    if (msg.indexOf('pending') > -1 || msg.indexOf('approval') > -1) {
+      queryParams = 'q=ApprovalStatus=Required';
+      title = 'AP Invoices Pending Approval';
+    } else if (msg.indexOf('unpaid') > -1 || msg.indexOf('outstanding') > -1) {
+      queryParams = 'q=PaidStatus=Unpaid';
+      title = 'Unpaid AP Invoices';
+    } else if (msg.indexOf('cancel') > -1) {
+      queryParams = 'q=ValidationStatus=Canceled';
+      title = 'Canceled AP Invoices';
+    } else if (msg.indexOf('paid') > -1) {
+      queryParams = 'q=PaidStatus=Paid';
+      title = 'Paid AP Invoices';
+    }
+    var url = FUSION_HOST + '/fscmRestApi/resources/11.13.18.05/invoices?limit=5';
+    if (queryParams) {
+      url = url + '&' + queryParams;
+    }
+    var res = await axios.get(url, {
+      auth: { username: FUSION_USER, password: FUSION_PASS }
+    });
+    var invoices = res.data.items || [];
+    if (invoices.length === 0) {
+      return { reply: 'No invoices found.', conversationId: null };
+    }
+    var reply = title + '\n\n';
+    for (var i = 0; i < invoices.length; i++) {
+      var inv = invoices[i];
+      reply += (i + 1) + '. Invoice #' + inv.InvoiceNumber + '\n';
+      reply += '   Supplier: ' + inv.Supplier + '\n';
+      reply += '   Amount: ' + inv.InvoiceCurrency + ' ' + inv.InvoiceAmount + '\n';
+      reply += '   Date: ' + inv.InvoiceDate + '\n';
+      reply += '   Status: ' + inv.ValidationStatus + '\n\n';
+    }
+    reply += 'You can ask:\n';
+    reply += '- Show pending approval invoices\n';
+    reply += '- Show unpaid invoices\n';
+    reply += '- Show latest invoices\n';
+    return { reply: reply, conversationId: null };
+  } catch (err) {
+    console.error('Direct API error: ' + err.message);
+    return { reply: 'Error connecting to Oracle. Please try again.', conversationId: null };
   }
 }
 
@@ -121,13 +172,16 @@ async function sendWhatsApp(to, text) {
 }
 
 app.get('/', function(req, res) {
-  res.send('Oracle AR Collections AI Agent WhatsApp Bridge is running OK');
+  res.send('Oracle AI Agent WhatsApp Bridge is running OK');
 });
 
 app.get('/debug', function(req, res) {
   res.json({
     FUSION_HOST: FUSION_HOST,
     AGENT_CODE: AGENT_CODE,
+    TOKEN_URL: TOKEN_URL,
+    CLIENT_ID: CLIENT_ID ? 'SET' : 'NOT SET',
+    CLIENT_SECRET: CLIENT_SECRET ? 'SET' : 'NOT SET',
     FUSION_USER: FUSION_USER ? 'SET' : 'NOT SET',
     FUSION_PASS: FUSION_PASS ? 'SET' : 'NOT SET',
     WA_TOKEN: WA_TOKEN ? 'SET' : 'NOT SET',
@@ -167,19 +221,6 @@ app.post('/webhook', async function(req, res) {
     await sendWhatsApp(userPhone, result.reply);
   } catch (e) {
     console.error('Webhook error: ' + e.message);
-    try {
-      var errPhone = req.body && req.body.entry && req.body.entry[0] &&
-        req.body.entry[0].changes && req.body.entry[0].changes[0] &&
-        req.body.entry[0].changes[0].value &&
-        req.body.entry[0].changes[0].value.messages &&
-        req.body.entry[0].changes[0].value.messages[0] &&
-        req.body.entry[0].changes[0].value.messages[0].from;
-      if (errPhone) {
-        await sendWhatsApp(errPhone, 'Sorry, something went wrong. Please try again.');
-      }
-    } catch (e2) {
-      console.error('Error sending error message: ' + e2.message);
-    }
   }
 });
 
@@ -188,6 +229,7 @@ app.listen(PORT, function() {
   console.log('Server running on port ' + PORT);
   console.log('FUSION_HOST: ' + FUSION_HOST);
   console.log('AGENT_CODE: ' + AGENT_CODE);
+  console.log('CLIENT_ID set: ' + !!CLIENT_ID);
   console.log('FUSION_USER: ' + (FUSION_USER ? 'SET' : 'NOT SET'));
   console.log('WA_TOKEN set: ' + !!WA_TOKEN);
   console.log('PHONE_ID: ' + PHONE_ID);
